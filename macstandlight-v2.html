@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>MacStandLight v2 — Interactive 3D CAD Viewer</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: rgba(20, 26, 35, 0.88);
+    --border: rgba(255, 255, 255, 0.12);
+    --accent: #2dd4bf;
+    --accent2: #38bdf8;
+    --text: #e6edf3;
+    --muted: #8b949e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
+  #viewport { width: 100%; height: 100%; touch-action: none; display: block; }
+
+  .topbar {
+    position: fixed; top: 12px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    pointer-events: none; z-index: 10;
+  }
+  .badge {
+    pointer-events: auto;
+    background: var(--panel); backdrop-filter: blur(12px);
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 8px 14px;
+  }
+  .badge h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.2px; }
+  .badge p { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .hud-toggle {
+    pointer-events: auto;
+    background: var(--panel); backdrop-filter: blur(12px);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 9px 13px; font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+
+  .panel {
+    position: fixed; right: 12px; bottom: 12px; width: 290px; max-width: calc(100vw - 24px);
+    background: var(--panel); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; z-index: 10; transition: transform 0.22s ease, opacity 0.22s ease;
+  }
+  .panel.hidden { transform: translateY(20px); opacity: 0; pointer-events: none; }
+
+  .control { margin-bottom: 12px; }
+  .control-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+  .control-head span:last-child { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+  .grid-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+  button.btn, label.btn {
+    background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+    color: var(--text); border-radius: 9px; padding: 8px 10px;
+    font-size: 12px; font-weight: 600; cursor: pointer; text-align: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button.btn.active { background: rgba(45, 212, 191, 0.2); border-color: var(--accent); color: #99f6e4; }
+  button.btn:hover, label.btn:hover { background: rgba(255,255,255,0.12); }
+  .btn-full { grid-column: span 2; background: rgba(56, 189, 248, 0.16); border-color: rgba(56, 189, 248, 0.45); color: #bae6fd; }
+  #stlInput { display: none; }
+
+  .hint {
+    position: fixed; left: 12px; bottom: 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px 10px; font-size: 11px; color: var(--muted);
+    pointer-events: none; z-index: 5;
+  }
+  @media (max-width: 640px) {
+    .hint { display: none; }
+    .panel { left: 12px; right: 12px; width: auto; }
+  }
+</style>
+</head>
+<body>
+<canvas id="viewport"></canvas>
+
+<div class="topbar">
+  <div class="badge">
+    <h1 id="modelTitle">MacStandLight v2</h1>
+    <p id="modelSub">32.3g PLA+ • 10° Typing Slope • 4-Part X-Brace</p>
+  </div>
+  <button class="hud-toggle" id="toggleHud">Controls</button>
+</div>
+
+<div class="hint">Drag: Orbit • Pinch/Scroll: Zoom • 2-Finger/Right-Drag: Pan</div>
+
+<div class="panel" id="hudPanel">
+  <div class="control">
+    <div class="control-head"><span>Exploded View (Blown-Up)</span><span id="explodeVal">0%</span></div>
+    <input type="range" id="explodeSlider" min="0" max="100" value="0" />
+  </div>
+  <div class="control">
+    <div class="control-head"><span>Opacity / X-Ray</span><span id="opacityVal">100%</span></div>
+    <input type="range" id="opacitySlider" min="15" max="100" value="100" />
+  </div>
+  <div class="grid-btns">
+    <button class="btn active" id="btnLaptop">MacBook Ghost</button>
+    <button class="btn" id="btnWire">Wireframe</button>
+    <button class="btn" id="btnSpin">Auto-Spin</button>
+    <button class="btn" id="btnReset">Reset View</button>
+    <label class="btn btn-full" for="stlInput">Open Any .STL File</label>
+    <input type="file" id="stlInput" accept=".stl" />
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script>
+  const canvas = document.getElementById('viewport');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0d1117);
+
+  const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 3000);
+  camera.position.set(270, 210, 310);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.target.set(0, 42, 0);
+
+  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.9));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
+  keyLight.position.set(220, 340, 240);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.near = 50; keyLight.shadow.camera.far = 900;
+  const d = 260;
+  keyLight.shadow.camera.left = -d; keyLight.shadow.camera.right = d;
+  keyLight.shadow.camera.top = d; keyLight.shadow.camera.bottom = -d;
+  scene.add(keyLight);
+
+  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.55);
+  rimLight.position.set(-240, 140, -220);
+  scene.add(rimLight);
+
+  const grid = new THREE.GridHelper(360, 18, 0x334155, 0x1e293b);
+  scene.add(grid);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(800, 800),
+    new THREE.ShadowMaterial({ opacity: 0.35 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x14b8a6, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 1 });
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 1 });
+  const barAMat  = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.3, metalness: 0.15, transparent: true, opacity: 1 });
+  const barBMat  = new THREE.MeshStandardMaterial({ color: 0xa855f7, roughness: 0.3, metalness: 0.15, transparent: true, opacity: 1 });
+  const macMat   = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.25, metalness: 0.75, transparent: true, opacity: 0.28 });
+
+  const assemblyGroup = new THREE.Group();
+  scene.add(assemblyGroup);
+  let customStlMesh = null;
+
+  function makeRoundedBar(len, thick, height, r) {
+    const s = new THREE.Shape();
+    const x = -len / 2, y = -height / 2;
+    s.moveTo(x + r, y);
+    s.lineTo(x + len - r, y); s.quadraticCurveTo(x + len, y, x + len, y + r);
+    s.lineTo(x + len, y + height - r); s.quadraticCurveTo(x + len, y + height, x + len - r, y + height);
+    s.lineTo(x + r, y + height); s.quadraticCurveTo(x, y + height, x, y + height - r);
+    s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+    const geo = new THREE.ExtrudeGeometry(s, {
+      depth: thick, bevelEnabled: true, bevelSegments: 4, steps: 1, bevelSize: 0.4, bevelThickness: 0.4
+    });
+    geo.translate(0, 0, -thick / 2);
+    return geo;
+  }
+
+  function buildSkeletonSide(isRight) {
+    const g = new THREE.Group();
+    const slope = (10 * Math.PI) / 180;
+
+    const rail = new THREE.Mesh(makeRoundedBar(222, 3.4, 8, 3), frameMat);
+    rail.position.set(0, 56, 0);
+    rail.rotation.z = slope;
+    rail.castShadow = true;
+    g.add(rail);
+
+    const frontStop = new THREE.Mesh(makeRoundedBar(7, 3.4, 15, 2.5), frameMat);
+    frontStop.position.set(-108.5, 42, 0);
+    frontStop.castShadow = true;
+    g.add(frontStop);
+
+    const rearStop = new THREE.Mesh(makeRoundedBar(7, 3.4, 13, 2.5), frameMat);
+    rearStop.position.set(108.5, 79, 0);
+    rearStop.castShadow = true;
+    g.add(rearStop);
+
+    const fg = new THREE.Mesh(makeRoundedBar(26, 1.8, 6.5, 2), guardMat);
+    fg.position.set(-92, 44.5, isRight ? -2.4 : 2.4);
+    fg.rotation.z = slope;
+    g.add(fg);
+
+    const rg = new THREE.Mesh(makeRoundedBar(26, 1.8, 6.5, 2), guardMat);
+    rg.position.set(92, 77, isRight ? -2.4 : 2.4);
+    rg.rotation.z = slope;
+    g.add(rg);
+
+    const fLeg = new THREE.Mesh(makeRoundedBar(7.5, 3.4, 37, 2.5), frameMat);
+    fLeg.position.set(-96, 20, 0);
+    fLeg.castShadow = true;
+    g.add(fLeg);
+
+    const fFoot = new THREE.Mesh(makeRoundedBar(24, 3.4, 5.5, 2.5), frameMat);
+    fFoot.position.set(-96, 3, 0);
+    g.add(fFoot);
+
+    const fStrut = new THREE.Mesh(makeRoundedBar(38, 3.4, 6, 2.2), frameMat);
+    fStrut.position.set(-80, 29, 0);
+    fStrut.rotation.z = 0.72;
+    g.add(fStrut);
+
+    const rLeg = new THREE.Mesh(makeRoundedBar(7.5, 3.4, 73, 2.5), frameMat);
+    rLeg.position.set(98, 38, 0);
+    rLeg.castShadow = true;
+    g.add(rLeg);
+
+    const rFoot = new THREE.Mesh(makeRoundedBar(24, 3.4, 5.5, 2.5), frameMat);
+    rFoot.position.set(98, 3, 0);
+    g.add(rFoot);
+
+    const rStrut = new THREE.Mesh(makeRoundedBar(74, 3.4, 6, 2.2), frameMat);
+    rStrut.position.set(66, 37, 0);
+    rStrut.rotation.z = -0.66;
+    g.add(rStrut);
+
+    g.rotation.y = Math.PI / 2;
+    return g;
+  }
+
+  const leftFrame = buildSkeletonSide(false);
+  leftFrame.position.set(-154.5, 0, 0);
+  assemblyGroup.add(leftFrame);
+
+  const rightFrame = buildSkeletonSide(true);
+  rightFrame.position.set(154.5, 0, 0);
+  assemblyGroup.add(rightFrame);
+
+  const diagLen = 336;
+  const diagYaw = Math.atan2(102, 309);
+  const slope = (10 * Math.PI) / 180;
+
+  const barA = new THREE.Mesh(makeRoundedBar(diagLen, 7.5, 2.8, 1.2), barAMat);
+  barA.position.set(0, 50.5, 0);
+  barA.rotation.set(slope, diagYaw, 0, 'XZY');
+  barA.castShadow = true;
+  assemblyGroup.add(barA);
+
+  const barB = new THREE.Mesh(makeRoundedBar(diagLen, 7.5, 2.8, 1.2), barBMat);
+  barB.position.set(0, 50.5, 0);
+  barB.rotation.set(slope, -diagYaw, 0, 'XZY');
+  barB.castShadow = true;
+  assemblyGroup.add(barB);
+
+  const macGeo = new THREE.BoxGeometry(304.1, 11.3, 215.0);
+  const macGhost = new THREE.Mesh(macGeo, macMat);
+  macGhost.position.set(0, 65.5, 0);
+  macGhost.rotation.x = slope;
+  assemblyGroup.add(macGhost);
+
+  const parts = [
+    { obj: leftFrame,  base: leftFrame.position.clone(),  delta: new THREE.Vector3(-65, 0, 0) },
+    { obj: rightFrame, base: rightFrame.position.clone(), delta: new THREE.Vector3(65, 0, 0) },
+    { obj: barA,       base: barA.position.clone(),       delta: new THREE.Vector3(0, -32, 24) },
+    { obj: barB,       base: barB.position.clone(),       delta: new THREE.Vector3(0, -64, -24) },
+    { obj: macGhost,   base: macGhost.position.clone(),   delta: new THREE.Vector3(0, 75, 0) }
+  ];
+
+  const explodeSlider = document.getElementById('explodeSlider');
+  const explodeVal = document.getElementById('explodeVal');
+  const opacitySlider = document.getElementById('opacitySlider');
+  const opacityVal = document.getElementById('opacityVal');
+  const hudPanel = document.getElementById('hudPanel');
+
+  document.getElementById('toggleHud').onclick = () => hudPanel.classList.toggle('hidden');
+
+  explodeSlider.oninput = () => {
+    const t = explodeSlider.value / 100;
+    explodeVal.textContent = explodeSlider.value + '%';
+    parts.forEach(p => p.obj.position.copy(p.base).addScaledVector(p.delta, t));
+  };
+
+  opacitySlider.oninput = () => {
+    const op = opacitySlider.value / 100;
+    opacityVal.textContent = opacitySlider.value + '%';
+    [frameMat, guardMat, barAMat, barBMat].forEach(m => { m.opacity = op; m.depthWrite = op > 0.85; });
+    if (customStlMesh) {
+      customStlMesh.material.opacity = op;
+      customStlMesh.material.depthWrite = op > 0.85;
+    }
+  };
+
+  const btnLaptop = document.getElementById('btnLaptop');
+  btnLaptop.onclick = () => {
+    macGhost.visible = !macGhost.visible;
+    btnLaptop.classList.toggle('active', macGhost.visible);
+  };
+
+  const btnWire = document.getElementById('btnWire');
+  let wireOn = false;
+  btnWire.onclick = () => {
+    wireOn = !wireOn;
+    btnWire.classList.toggle('active', wireOn);
+    [frameMat, guardMat, barAMat, barBMat].forEach(m => m.wireframe = wireOn);
+    if (customStlMesh) customStlMesh.material.wireframe = wireOn;
+  };
+
+  const btnSpin = document.getElementById('btnSpin');
+  btnSpin.onclick = () => {
+    controls.autoRotate = !controls.autoRotate;
+    controls.autoRotateSpeed = 1.6;
+    btnSpin.classList.toggle('active', controls.autoRotate);
+  };
+
+  document.getElementById('btnReset').onclick = () => {
+    camera.position.set(270, 210, 310);
+    controls.target.set(0, 42, 0);
+    explodeSlider.value = 0; explodeSlider.oninput();
+    opacitySlider.value = 100; opacitySlider.oninput();
+  };
+
+  document.getElementById('stlInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const loader = new THREE.STLLoader();
+      const geo = loader.parse(ev.target.result);
+      geo.computeBoundingBox();
+      const box = geo.boundingBox;
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      geo.translate(-center.x, -box.min.y, -center.z);
+      geo.computeVertexNormals();
+
+      assemblyGroup.visible = false;
+      if (customStlMesh) scene.remove(customStlMesh);
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x2dd4bf, roughness: 0.32, metalness: 0.12,
+        transparent: true, opacity: opacitySlider.value / 100, wireframe: wireOn
+      });
+      customStlMesh = new THREE.Mesh(geo, mat);
+      customStlMesh.castShadow = true;
+      customStlMesh.receiveShadow = true;
+      scene.add(customStlMesh);
+
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      camera.position.set(maxDim * 1.15, maxDim * 0.9, maxDim * 1.25);
+      controls.target.set(0, size.y * 0.45, 0);
+      document.getElementById('modelTitle').textContent = file.name;
+      document.getElementById('modelSub').textContent = `${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)} mm`;
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+</script>
+</body>
+</html>
